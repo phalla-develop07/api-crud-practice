@@ -7,6 +7,7 @@ use App\Models\Product;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
+use Illuminate\Support\Facades\Storage;
 
 class ProductController extends Controller
 {
@@ -26,63 +27,10 @@ class ProductController extends Controller
 
         return response()->json([
             'success' => true,
-            'message' => 'Products are listed successfully.',
-            'count' => $products->count(),
-            'data' => $products,
+            'message' => 'Products retrieved successfully.',
+            'count'   => $products->count(),
+            'data'    => $products,
         ], 200);
-    }
-
-    /**
-     * Store a newly created resource.
-     */
-    public function store(Request $request)
-    {
-        $validator = Validator::make($request->all(), [
-            'name' => 'required|string|max:255|unique:products,name',
-            'description' => 'nullable|string|max:1000',
-            // 'image' => 'nullable|string|max:255',
-            'image'         => 'nullable|image|mimes:jpeg,png,jpg,gif,webp,svg|max:2048',
-            'is_active' => 'boolean',
-            'price' => 'required|numeric|min:0',
-            'stock' => 'required|integer|min:0',
-            'category_id' => 'required|exists:categories,id',
-        ], [
-            'name.required' => 'Product name is required.',
-            'name.unique' => 'Product name already exists.',
-            'price.required' => 'Price is required.',
-            'price.numeric' => 'Price must be a number.',
-            'stock.required' => 'Stock is required.',
-            'stock.integer' => 'Stock must be an integer.',
-            'category_id.required' => 'Category is required.',
-            'category_id.exists' => 'Selected category does not exist.',
-            'is_active.boolean' => 'Is active must be a boolean.',
-            'image.image' => 'Image must be an image file.',
-            'image.mimes' => 'Image must be a file of type: jpeg, png, jpg, gif, webp, svg.',
-            'image.max' => 'Image must not exceed 2048 kilobytes.',
-            'description.string' => 'Description must be a string.',
-            'description.max' => 'Description must not exceed 1000 characters.',
-            'name.string' => 'Name must be a string.',
-            'name.max' => 'Name must not exceed 255 characters.',
-            'price.min' => 'Price must not be less than 0.',
-            'stock.min' => 'Stock must not be less than 0.',
-            'category_id.integer' => 'Category must be an integer.',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Validation failed.',
-                'errors' => $validator->errors(),
-            ], 422);
-        }
-
-        $product = Product::create($validator->validated());
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Product is created successfully.',
-            'data' => $product->load('category'),
-        ], 201);
     }
 
     /**
@@ -101,16 +49,63 @@ class ProductController extends Controller
 
         return response()->json([
             'success' => true,
-            'data' => $product,
+            'message' => 'Product retrieved successfully.',
+            'data'    => $product,
         ], 200);
     }
 
     /**
+     * Store a newly created resource.
+     */
+    public function store(Request $request)
+    {
+        $validator = Validator::make($request->all(), [
+            'name'        => 'required|string|max:255|unique:products,name',
+            'description' => 'nullable|string|max:2000',
+            'price'       => 'required|numeric|min:0|max:999999.99',
+            'stock'       => 'required|integer|min:0|max:999999',
+            'category_id' => 'required|exists:categories,id',
+            'is_active'   => 'boolean',
+            'image'       => 'nullable|image|mimes:jpeg,png,jpg,gif,webp,svg|max:5120',
+        ], $this->validationMessages());
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation failed.',
+                'errors'  => $validator->errors(),
+            ], 422);
+        }
+
+        $data = $validator->validated();
+
+        if ($request->hasFile('image')) {
+            $data['image'] = $request->file('image')->store('products', 'public');
+        }
+
+        $product = Product::create($data);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Product created successfully.',
+            'data'    => $product->load('category'),
+        ], 201);
+    }
+
+    /**
      * Update the specified resource.
+     * Supports both PUT (JSON) and POST with _method=PUT (multipart/form-data for file uploads).
      */
     public function update(Request $request, $id)
     {
-        $product = Product::findOrFail($id);
+        $product = Product::find($id);
+
+        if (!$product) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Product not found.',
+            ], 404);
+        }
 
         $validator = Validator::make($request->all(), [
             'name' => [
@@ -120,39 +115,51 @@ class ProductController extends Controller
                 'max:255',
                 Rule::unique('products')->ignore($id),
             ],
-            'description' => 'nullable|string|max:1000',
-            'price' => 'sometimes|required|numeric|min:0',
-            'stock' => 'sometimes|required|integer|min:0',
-            'is_active' => 'sometimes|boolean',
-            'image' => 'nullable|string|max:255',
+            'description' => 'nullable|string|max:2000',
+            'price'       => 'sometimes|required|numeric|min:0|max:999999.99',
+            'stock'       => 'sometimes|required|integer|min:0|max:999999',
             'category_id' => 'sometimes|required|exists:categories,id',
-        ], [
-            'name.required' => 'Product name is required.',
-            'name.unique' => 'Product name already exists.',
-            'price.numeric' => 'Price must be a number.',
-            'stock.integer' => 'Stock must be an integer.',
-            'is_active.boolean' => 'Is active must be a boolean.',
-            'image.string' => 'Image must be a string.',
-            'image.max' => 'Image must not exceed 255 characters.',
-            'category_id.required' => 'Category is required.',
-            'category_id.integer' => 'Category must be an integer.',
-            'category_id.exists' => 'Selected category does not exist.',
-        ]);
+            'is_active'   => 'sometimes|boolean',
+            'image'       => 'nullable|image|mimes:jpeg,png,jpg,gif,webp,svg|max:5120',
+            'remove_image'=> 'sometimes|boolean',
+        ], $this->validationMessages());
 
         if ($validator->fails()) {
             return response()->json([
                 'success' => false,
                 'message' => 'Validation failed.',
-                'errors' => $validator->errors(),
+                'errors'  => $validator->errors(),
             ], 422);
         }
 
-        $product->update($validator->validated());
+        $data = $validator->validated();
+
+        // Handle explicit image removal
+        if (!empty($data['remove_image'])) {
+            if ($product->image) {
+                Storage::disk('public')->delete($product->image);
+            }
+            $data['image'] = null;
+            unset($data['remove_image']);
+        }
+        // Handle new image upload
+        elseif ($request->hasFile('image')) {
+            if ($product->image) {
+                Storage::disk('public')->delete($product->image);
+            }
+            $data['image'] = $request->file('image')->store('products', 'public');
+        }
+        // Prevent accidental overwrite of image with a plain string
+        elseif (array_key_exists('image', $data) && is_string($data['image'])) {
+            unset($data['image']);
+        }
+
+        $product->update($data);
 
         return response()->json([
             'success' => true,
-            'message' => 'Product is updated successfully.',
-            'data' => $product->load('category'),
+            'message' => 'Product updated successfully.',
+            'data'    => $product->fresh('category'),
         ], 200);
     }
 
@@ -161,13 +168,56 @@ class ProductController extends Controller
      */
     public function destroy($id)
     {
-        $product = Product::findOrFail($id);
+        $product = Product::find($id);
+
+        if (!$product) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Product not found.',
+            ], 404);
+        }
+
+        // Delete associated image from storage
+        if ($product->image) {
+            Storage::disk('public')->delete($product->image);
+        }
 
         $product->delete();
 
         return response()->json([
             'success' => true,
-            'message' => 'Product is deleted successfully.',
+            'message' => 'Product deleted successfully.',
         ], 200);
+    }
+
+    /**
+     * Reusable validation messages.
+     */
+    private function validationMessages(): array
+    {
+        return [
+            'name.required'       => 'Product name is required.',
+            'name.unique'         => 'A product with this name already exists.',
+            'name.max'            => 'Product name cannot exceed 255 characters.',
+
+            'price.required'      => 'Price is required.',
+            'price.numeric'       => 'Price must be a valid number.',
+            'price.min'           => 'Price cannot be negative.',
+            'price.max'           => 'Price cannot exceed $999,999.99.',
+
+            'stock.required'      => 'Stock quantity is required.',
+            'stock.integer'       => 'Stock must be a whole number.',
+            'stock.min'           => 'Stock cannot be negative.',
+            'stock.max'           => 'Stock quantity cannot exceed 999,999.',
+
+            'category_id.required'=> 'Please select a category.',
+            'category_id.exists'  => 'The selected category does not exist.',
+
+            'image.image'         => 'The uploaded file must be a valid image.',
+            'image.mimes'         => 'Allowed image types: jpeg, png, jpg, gif, webp, svg.',
+            'image.max'           => 'Image size must not exceed 5MB.',
+
+            'description.max'     => 'Description cannot exceed 2,000 characters.',
+        ];
     }
 }
